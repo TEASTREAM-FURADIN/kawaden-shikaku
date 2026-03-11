@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>川電 資格一覧表</title>
+    <!-- Tailwind CSS (デザイン用) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel (JSX変換用) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <!-- アプリのプログラム本体 -->
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // ==========================================
+        // ⚠️【重要】ステップ1で取得したあなたの鍵をここに入力！
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "apiKey: "AIzaSyDDIXxZGVZp4Zp2ri4QkmPu2IMG0btuCPI",
+  authDomain: "kawaden-shikaku.firebaseapp.com",
+  projectId: "kawaden-shikaku",
+  storageBucket: "kawaden-shikaku.firebasestorage.app",
+  messagingSenderId: "319150839014",
+  appId: "1:319150839014:web:af0a28cf637965f7bb5727",
+  measurementId: "G-ZRZGSZ7DPJ"
+        };
+        // ==========================================
+
+        // --- 初期データ（資格マスター） ---
+        const defaultQualifications = [
+            { id: 'q13', name: '第一種電気工事士' },
+            { id: 'q14', name: '第二種電気工事士' },
+            { id: 'q15', name: '1級電気施工管理' },
+            { id: 'q16', name: '2級電気施工管理' },
+            { id: 'q17', name: '認定電気工事従事者' },
+            { id: 'q18', name: '電気工事作業指揮者', isKinden: true },
+            { id: 'q19', name: '甲4類消防設備士' },
+            { id: 'q20', name: '職長・安全衛生責任者', isKinden: true },
+            { id: 'q28', name: 'フルハーネス講習', isKinden: true },
+            { id: 'q1', name: '低圧', isKinden: true },
+            { id: 'q2', name: '高圧', isKinden: true },
+            { id: 'q3', name: '酸欠', isKinden: true },
+            { id: 'q7', name: '酸欠主任者' },
+            { id: 'q4', name: '高所作業車(10m未満)' },
+            { id: 'q8', name: '高所作業車(10m以上)' },
+            { id: 'q5', name: '足場作業' },
+            { id: 'q9', name: '足場主任者' },
+            { id: 'q6', name: '玉掛(1t未満)' },
+            { id: 'q10', name: '玉掛(1t以上)' },
+            { id: 'q21', name: '小型移動式クレーン' },
+            { id: 'q26', name: 'クレーン運転5ｔ未満' },
+            { id: 'q27', name: '巻き上げ機の運転' },
+            { id: 'q22', name: '小型車両建設教育' },
+            { id: 'q23', name: '丸ノコ等取替作業', isKinden: true },
+            { id: 'q24', name: '自由研削といし', isKinden: true },
+            { id: 'q25', name: '電動工具取扱教育', isKinden: true },
+            { id: 'q11', name: '危険感受性', isKinden: true },
+            { id: 'q12', name: '送電教育', isKinden: true }
+        ];
+
+        const defaultWorkers = [
+            { id: 'w1', name: '川口 雄志', quals: ['q13', 'q15', 'q1', 'q2', 'q3', 'q20', 'q28'] },
+            { id: 'w2', name: '石橋 広行', quals: ['q14', 'q1', 'q4', 'q5', 'q28'] },
+            { id: 'w3', name: '門田 友彰', quals: ['q14', 'q1', 'q5', 'q6', 'q28'] },
+            { id: 'w4', name: '小中原 満', quals: ['q1', 'q2'] },
+            { id: 'w5', name: '池田 元樹', quals: ['q1', 'q5', 'q20'] },
+            { id: 'w6', name: '浜谷 政和', quals: ['q1', 'q6'] },
+            { id: 'w7', name: '森 拓也', quals: ['q1', 'q4'] },
+            { id: 'w8', name: '松本 大輔', quals: ['q1'] },
+            { id: 'w9', name: '林 涼介', quals: ['q1', 'q2', 'q28'] },
+            { id: 'w10', name: '小田 照行', quals: ['q1'] },
+            { id: 'w11', name: '田子 昭一', quals: ['q1', 'q3'] },
+            { id: 'w12', name: '橋本 晃生', quals: ['q1'] },
+            { id: 'w13', name: '柳井 東弥', quals: ['q1', 'q5'] },
+            { id: 'w14', name: '久保田 浩行', quals: ['q1', 'q6'] },
+            { id: 'w15', name: '豊岡 寿明', quals: ['q1'] },
+        ];
+
+        function App() {
+            const [qualifications, setQualifications] = useState(defaultQualifications);
+            const [workers, setWorkers] = useState(defaultWorkers);
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [newWorkerName, setNewWorkerName] = useState('');
+            // ※今回はHTML1枚で動かすための簡易版として、一時的にローカルで動作する設定にしています。
+            // 実際にはここにFirebaseの読み書きのコード（先ほどのReact版と同じもの）が入ります。
+
+            useEffect(() => {
+                // アイコンの描画
+                lucide.createIcons();
+            }, [workers, showAddModal]);
+
+            const toggleQual = (workerId, qualId) => {
+                setWorkers(workers.map(worker => {
+                    if (worker.id === workerId) {
+                        const hasQual = worker.quals.includes(qualId);
+                        const newQuals = hasQual ? worker.quals.filter(id => id !== qualId) : [...worker.quals, qualId];
+                        return { ...worker, quals: newQuals };
+                    }
+                    return worker;
+                }));
+            };
+
+            const handleAddWorkerSubmit = (e) => {
+                e.preventDefault();
+                if (!newWorkerName.trim()) return;
+                setWorkers([...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), quals: [] }]);
+                setNewWorkerName('');
+                setShowAddModal(false);
+            };
+
+            return (
+                <div className="min-h-screen bg-white font-sans text-sm flex flex-col">
+                    <header className="bg-blue-800 text-white p-4 shadow-md flex justify-between items-center">
+                        <div>
+                            <h1 className="text-xl font-bold tracking-wider">有資格者一覧表</h1>
+                        </div>
+                        <button 
+                            onClick={() => setShowAddModal(true)}
+                            className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded shadow-sm text-sm font-bold"
+                        >
+                            <i data-lucide="user-plus" class="w-4 h-4"></i>
+                            <span className="hidden sm:inline">職人追加</span>
+                        </button>
+                    </header>
+
+                    <div className="p-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2 text-xs text-blue-800 font-bold">
+                        <i data-lucide="info" class="w-4 h-4 text-blue-600"></i>
+                        表内の青い列は「きんでん大阪支社」での講習開催対象です
+                    </div>
+
+                    <div className="flex-1 overflow-auto relative bg-gray-50 p-2 sm:p-4">
+                        <div className="bg-white shadow-sm border border-gray-300 inline-block min-w-full">
+                            <table className="min-w-full border-collapse">
+                                <thead>
+                                    <tr>
+                                        <th className="sticky top-0 left-0 z-30 bg-gray-200 border border-gray-300 p-2 min-w-[100px] shadow-[1px_1px_0_#d1d5db]">
+                                            氏名 \ 資格
+                                        </th>
+                                        {qualifications.map(q => (
+                                            <th key={q.id} className={`sticky top-0 z-20 border border-gray-300 p-1 w-10 min-w-[40px] shadow-[0_1px_0_#d1d5db] ${q.isKinden ? 'bg-blue-100' : 'bg-gray-100'}`}>
+                                                <div className="flex flex-col items-center justify-end h-40">
+                                                    <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }} className="text-xs font-medium tracking-widest text-gray-700 h-full text-center">
+                                                        {q.name}
+                                                    </span>
+                                                </div>
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {workers.map((worker) => (
+                                        <tr key={worker.id} className="hover:bg-yellow-50 transition-colors">
+                                            <td className="sticky left-0 z-10 bg-white border border-gray-300 p-2 font-bold text-gray-800 shadow-[1px_0_0_#d1d5db] whitespace-nowrap">
+                                                {worker.name}
+                                            </td>
+                                            {qualifications.map(q => {
+                                                const hasQual = worker.quals.includes(q.id);
+                                                return (
+                                                    <td key={q.id} onClick={() => toggleQual(worker.id, q.id)}
+                                                        className={`border border-gray-300 text-center cursor-pointer select-none
+                                                        ${hasQual ? 'text-green-600 text-lg font-bold' : 'text-gray-200'}
+                                                        ${q.isKinden ? 'bg-blue-50/30' : ''} hover:bg-blue-100`}>
+                                                        {hasQual ? '◯' : '・'}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                                <tfoot className="sticky bottom-0 z-20 shadow-[0_-1px_0_#d1d5db]">
+                                    <tr>
+                                        <td className="sticky left-0 z-30 bg-gray-200 border border-gray-300 p-2 text-center font-bold text-gray-800 shadow-[1px_0_0_#d1d5db]">
+                                            合計
+                                        </td>
+                                        {qualifications.map(q => {
+                                            const total = workers.filter(w => w.quals.includes(q.id)).length;
+                                            return (
+                                                <td key={q.id} className={`border border-gray-300 text-center p-2 font-bold ${total > 0 ? 'text-blue-600' : 'text-gray-400'} ${q.isKinden ? 'bg-blue-200/50' : 'bg-gray-100'}`}>
+                                                    {total}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    {showAddModal && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm">
+                                <h2 className="text-lg font-bold mb-4">職人追加</h2>
+                                <form onSubmit={handleAddWorkerSubmit}>
+                                    <input type="text" value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)} placeholder="名前" className="w-full border p-2 mb-4 rounded" autoFocus />
+                                    <div className="flex justify-end gap-2">
+                                        <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 border rounded">キャンセル</button>
+                                        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">追加</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
