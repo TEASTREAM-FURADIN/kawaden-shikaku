@@ -114,7 +114,7 @@
             const [isLoading, setIsLoading] = useState(true);
             const [authError, setAuthError] = useState(false);
             const [useLocalMode, setUseLocalMode] = useState(false);
-            const [isEditMode, setIsEditMode] = useState(false); // 🌟 編集モードの状態
+            const [isEditMode, setIsEditMode] = useState(false);
 
             // ① 認証
             useEffect(() => {
@@ -152,7 +152,6 @@
                 return () => unsubscribe();
             }, [user, useLocalMode]);
 
-            // クラウドへ保存する関数
             const updateCloud = (newWorkers, newQuals) => {
                 if (!user || useLocalMode) return;
                 db.collection('kawaden_data').doc('main_list').set({ 
@@ -161,15 +160,13 @@
                 });
             };
 
-            // 資格の◯・・切り替え
             const toggleQual = (workerId, qualId) => {
-                if (isEditMode) return; // 編集モード中はトグルしない
+                if (isEditMode) return;
                 const newWorkers = workers.map(w => w.id === workerId ? { ...w, quals: w.quals.includes(qualId) ? w.quals.filter(id => id !== qualId) : [...w.quals, qualId] } : w);
                 setWorkers(newWorkers);
                 updateCloud(newWorkers);
             };
 
-            // 職人の新規追加
             const handleAddWorkerSubmit = (e) => {
                 e.preventDefault();
                 if (!newWorkerName.trim()) return;
@@ -180,7 +177,6 @@
                 setShowAddModal(false);
             };
 
-            // 🌟 職人の並び替えとリネーム
             const moveWorker = (index, direction) => {
                 const newWorkers = [...workers];
                 const targetIndex = index + direction;
@@ -203,7 +199,6 @@
                 updateCloud(newWorkers);
             };
 
-            // 🌟 資格の並び替えとリネーム
             const moveQual = (index, direction) => {
                 const newQuals = [...qualifications];
                 const targetIndex = index + direction;
@@ -251,8 +246,9 @@
             }
 
             return (
-                <div className="min-h-screen bg-white text-sm flex flex-col font-sans">
-                    <header className={`text-white p-4 shadow-md flex justify-between items-center sticky top-0 z-50 transition-colors duration-300 ${isEditMode ? 'bg-orange-600' : 'bg-blue-800'}`}>
+                <div className="h-screen bg-white text-sm flex flex-col font-sans overflow-hidden">
+                    {/* ヘッダーは固定 */}
+                    <header className={`text-white p-4 shadow-md flex justify-between items-center z-50 shrink-0 transition-colors duration-300 ${isEditMode ? 'bg-orange-600' : 'bg-blue-800'}`}>
                         <div className="flex items-center gap-2">
                             <h1 className="text-xl font-bold">{isEditMode ? '設定・編集モード' : '川電 資格一覧表'}</h1>
                             {!useLocalMode && !isEditMode && (
@@ -274,27 +270,30 @@
                     </header>
 
                     {!isEditMode && (
-                        <div className="p-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2 text-xs text-blue-800 font-bold italic">
+                        <div className="p-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2 text-xs text-blue-800 font-bold shrink-0">
                             <IconInfo className="w-4 h-4 text-blue-600" />
                             青い列：きんでん大阪支社講習対象
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-auto bg-gray-100 p-2 sm:p-4">
-                        <div className="bg-white shadow-sm border border-gray-300 inline-block min-w-full rounded-lg overflow-hidden">
-                            <table className="min-w-full border-collapse">
+                    {/* スクロールエリア */}
+                    <div className="flex-1 overflow-auto bg-gray-100">
+                        <div className="inline-block min-w-full">
+                            <table className="min-w-full border-separate border-spacing-0">
                                 <thead>
                                     <tr>
-                                        <th className="sticky top-0 left-0 z-30 bg-gray-200 border border-gray-300 p-2 min-w-[120px] shadow-[1px_1px_0_#d1d5db]">
+                                        {/* 左上端（氏名ヘッダー）：縦にも横にも固定 */}
+                                        <th className="sticky top-0 left-0 z-40 bg-gray-200 border border-gray-300 p-2 min-w-[120px] shadow-[1px_1px_0_#d1d5db]">
                                             氏名 \ 資格
                                         </th>
                                         {qualifications.map((q, idx) => (
-                                            <th key={q.id} className={`sticky top-0 z-20 border border-gray-300 p-1 w-10 min-w-[50px] shadow-[0_1px_0_#d1d5db] ${q.isKinden ? 'bg-blue-100' : 'bg-gray-100'}`}>
+                                            /* 上端（資格名ヘッダー）：縦スクロール時に固定 */
+                                            <th key={q.id} className={`sticky top-0 z-30 border border-gray-300 p-1 w-10 min-w-[50px] shadow-[0_1px_0_#d1d5db] ${q.isKinden ? 'bg-blue-100' : 'bg-gray-100'}`}>
                                                 <div className="flex flex-col items-center justify-between h-48 py-2">
                                                     {isEditMode && (
                                                         <div className="flex gap-1 mb-1">
-                                                            <button onClick={() => moveQual(idx, -1)} className="p-1 bg-white rounded border border-gray-300 hover:bg-gray-50"><IconArrowUp className="rotate-270 w-3 h-3" style={{transform: 'rotate(-90deg)'}} /></button>
-                                                            <button onClick={() => moveQual(idx, 1)} className="p-1 bg-white rounded border border-gray-300 hover:bg-gray-50"><IconArrowDown className="rotate-270 w-3 h-3" style={{transform: 'rotate(-90deg)'}} /></button>
+                                                            <button onClick={() => moveQual(idx, -1)} className="p-1 bg-white rounded border border-gray-300 hover:bg-gray-50"><IconArrowUp className="w-3 h-3" style={{transform: 'rotate(-90deg)'}} /></button>
+                                                            <button onClick={() => moveQual(idx, 1)} className="p-1 bg-white rounded border border-gray-300 hover:bg-gray-50"><IconArrowDown className="w-3 h-3" style={{transform: 'rotate(-90deg)'}} /></button>
                                                             <button onClick={() => deleteQual(q.id)} className="p-1 bg-red-50 text-red-600 rounded border border-red-200 hover:bg-red-100"><IconTrash className="w-3 h-3" /></button>
                                                         </div>
                                                     )}
@@ -320,14 +319,15 @@
                                 <tbody>
                                     {workers.map((worker, wIdx) => (
                                         <tr key={worker.id} className={`${isEditMode ? 'bg-orange-50/20' : 'hover:bg-yellow-50'} transition-colors`}>
-                                            <td className="sticky left-0 z-10 bg-white border border-gray-300 p-2 font-bold text-gray-800 shadow-[1px_0_0_#d1d5db] whitespace-nowrap">
+                                            {/* 左端（氏名列）：横スクロール時に固定 */}
+                                            <td className="sticky left-0 z-20 bg-white border border-gray-300 p-2 font-bold text-gray-800 shadow-[1px_0_0_#d1d5db] whitespace-nowrap">
                                                 <div className="flex items-center gap-2">
-                                                    {isEditMode ? (
+                                                    {isEditMode && (
                                                         <div className="flex flex-col gap-1">
                                                             <button onClick={() => moveWorker(wIdx, -1)} className="p-0.5 bg-gray-100 rounded border border-gray-300"><IconArrowUp className="w-3 h-3" /></button>
                                                             <button onClick={() => moveWorker(wIdx, 1)} className="p-0.5 bg-gray-100 rounded border border-gray-300"><IconArrowDown className="w-3 h-3" /></button>
                                                         </div>
-                                                    ) : null}
+                                                    )}
                                                     {isEditMode ? (
                                                         <div className="flex flex-col gap-1 flex-1">
                                                             <input 
@@ -363,11 +363,13 @@
                                 </tbody>
                                 <tfoot>
                                     <tr className="bg-gray-100 font-bold">
-                                        <td className="sticky left-0 z-10 bg-gray-200 border border-gray-300 p-2 text-center shadow-[1px_0_0_#d1d5db]">合計</td>
+                                        {/* 下左端：縦横両方に固定 */}
+                                        <td className="sticky bottom-0 left-0 z-40 bg-gray-200 border border-gray-300 p-2 text-center shadow-[1px_-1px_0_#d1d5db]">合計</td>
                                         {qualifications.map(q => {
                                             const total = workers.filter(w => w.quals.includes(q.id)).length;
                                             return (
-                                                <td key={q.id} className={`border border-gray-300 text-center p-2 ${total > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                                                /* 下端：縦スクロール時に固定 */
+                                                <td key={q.id} className={`sticky bottom-0 z-30 border border-gray-300 text-center p-2 shadow-[0_-1px_0_#d1d5db] ${total > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
                                                     {total}
                                                 </td>
                                             );
@@ -376,16 +378,17 @@
                                 </tfoot>
                             </table>
                         </div>
-                        {isEditMode && (
-                            <div className="mt-4 p-4 bg-orange-100 border border-orange-200 rounded-lg text-orange-800 flex items-center gap-3">
-                                <IconSettings className="w-6 h-6 animate-spin-slow" style={{animation: 'spin 4s linear infinite'}} />
-                                <div>
-                                    <p className="font-bold">編集モード実行中</p>
-                                    <p className="text-xs">名前の書き換えや順番の入れ替えが可能です。終わったら右上の「完了」を押してください。</p>
-                                </div>
-                            </div>
-                        )}
                     </div>
+
+                    {isEditMode && (
+                        <div className="p-4 bg-orange-100 border-t border-orange-200 text-orange-800 flex items-center gap-3 shrink-0">
+                            <IconSettings className="w-6 h-6 animate-spin-slow" style={{animation: 'spin 4s linear infinite'}} />
+                            <div>
+                                <p className="font-bold">編集モード実行中</p>
+                                <p className="text-xs">名前や資格の入れ替え・書き換えが可能です。</p>
+                            </div>
+                        </div>
+                    )}
 
                     {showAddModal && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
