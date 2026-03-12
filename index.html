@@ -23,7 +23,7 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- 画像圧縮用関数（写真を軽くして保存するため） ---
+        // --- 画像圧縮用関数 ---
         const compressImage = (file, maxWidth = 1000) => {
             return new Promise((resolve) => {
                 const reader = new FileReader();
@@ -43,14 +43,46 @@
                         canvas.height = height;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, 0, 0, width, height);
-                        // 品質0.7のJPEGとして圧縮して出力
                         resolve(canvas.toDataURL('image/jpeg', 0.7));
                     };
                 };
             });
         };
 
-        // --- アイコン部品 (SVG) ---
+        // --- 📅 期限計算ロジック ---
+        // 甲4類の計算（4月1日基準）
+        const calcKou4Expire = (dateStr, isFirst) => {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            let year = d.getFullYear();
+            // 4月1日以後の場合、最初の4月1日は「翌年」になる
+            if (d.getMonth() > 3 || (d.getMonth() === 3 && d.getDate() >= 1)) {
+                year++;
+            }
+            const addYears = isFirst ? 2 : 5;
+            return `${year + addYears}-03-31`; // 期限はその年の3月31日
+        };
+
+        // 通常のN年更新の計算（1年前の前日）
+        const calcNormalExpire = (dateStr, years) => {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            d.setFullYear(d.getFullYear() + years);
+            d.setDate(d.getDate() - 1);
+            return d.toISOString().split('T')[0];
+        };
+
+        // 期限までの残り日数を計算
+        const getDaysUntilExpire = (dateStr) => {
+            if (!dateStr) return 999;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const exp = new Date(dateStr);
+            const diffTime = exp - today;
+            return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        };
+
+        // --- アイコン部品 ---
         const IconUserPlus = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>);
         const IconInfo = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>);
         const IconLoader = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>);
@@ -64,6 +96,7 @@
         const IconIdCard = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg>);
         const IconCamera = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>);
         const IconX = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>);
+        const IconClock = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>);
 
         // ==========================================
         // 🔐 Firebase 設定
@@ -84,17 +117,41 @@
         const auth = firebase.auth();
         const db = firebase.firestore();
 
+        // 🌟 資格マスター（定期更新の設定を追加）
         const defaultQualifications = [
-            { id: 'q13', name: '第一種電気工事士' }, { id: 'q14', name: '第二種電気工事士' }, { id: 'q15', name: '1級電気施工管理' },
-            { id: 'q16', name: '2級電気施工管理' }, { id: 'q17', name: '認定電気工事従事者' }, { id: 'q18', name: '電気工事作業指揮者', isKinden: true },
-            { id: 'q19', name: '甲4類消防設備士' }, { id: 'q20', name: '職長・安全衛生責任者', isKinden: true }, { id: 'q28', name: 'フルハーネス講習', isKinden: true },
-            { id: 'q1', name: '低圧', isKinden: true }, { id: 'q2', name: '高圧', isKinden: true }, { id: 'q3', name: '酸欠', isKinden: true }
+            { id: 'q13', name: '第一種電気工事士', requiresUpdate: true, updateIntervalYears: 5 }, 
+            { id: 'q14', name: '第二種電気工事士' }, 
+            { id: 'q15', name: '1級電気施工管理' },
+            { id: 'q16', name: '2級電気施工管理' }, 
+            { id: 'q17', name: '認定電気工事従事者' }, 
+            { id: 'q18', name: '電気工事作業指揮者', isKinden: true },
+            { id: 'q19', name: '甲4類消防設備士', requiresUpdate: true, isKou4: true }, 
+            { id: 'q20', name: '職長・安全衛生責任者', isKinden: true, requiresUpdate: true, updateIntervalYears: 5 }, 
+            { id: 'q28', name: 'フルハーネス講習', isKinden: true },
+            { id: 'q1', name: '低圧', isKinden: true }, 
+            { id: 'q2', name: '高圧', isKinden: true }, 
+            { id: 'q3', name: '酸欠', isKinden: true },
+            { id: 'q7', name: '酸欠主任者' },
+            { id: 'q4', name: '高所作業車(10m未満)' },
+            { id: 'q8', name: '高所作業車(10m以上)' },
+            { id: 'q5', name: '足場作業' },
+            { id: 'q9', name: '足場主任者' },
+            { id: 'q6', name: '玉掛(1t未満)' },
+            { id: 'q10', name: '玉掛(1t以上)' },
+            { id: 'q21', name: '小型移動式クレーン' },
+            { id: 'q26', name: 'クレーン運転5ｔ未満' },
+            { id: 'q27', name: '巻き上げ機の運転' },
+            { id: 'q22', name: '小型車両建設教育' },
+            { id: 'q23', name: '丸ノコ等取替作業', isKinden: true },
+            { id: 'q24', name: '自由研削といし', isKinden: true },
+            { id: 'q25', name: '電動工具取扱教育', isKinden: true },
+            { id: 'q11', name: '危険感受性', isKinden: true },
+            { id: 'q12', name: '送電教育', isKinden: true, requiresUpdate: true, updateIntervalYears: 1 }
         ];
 
-        // 🌟 healthDate（健康診断日）フィールドを初期データにも追加
         const defaultWorkers = [
-            { id: 'w1', name: '川口 雄志', healthDate: '', quals: ['q13', 'q15', 'q1', 'q2', 'q3', 'q20', 'q28'] },
-            { id: 'w2', name: '石橋 広行', healthDate: '', quals: ['q14', 'q1', 'q4', 'q5', 'q28'] }
+            { id: 'w1', name: '川口 雄志', healthDate: '', quals: ['q13', 'q15', 'q1', 'q2', 'q3', 'q20', 'q28'], qualDetails: {} },
+            { id: 'w2', name: '石橋 広行', healthDate: '', quals: ['q14', 'q1', 'q4', 'q5', 'q28'], qualDetails: {} }
         ];
 
         function App() {
@@ -106,7 +163,6 @@
             const [isLoading, setIsLoading] = useState(true);
             const [isEditMode, setIsEditMode] = useState(false);
             
-            // 写真機能用のState
             const [selectedWorkerId, setSelectedWorkerId] = useState(null);
             const [workerImages, setWorkerImages] = useState({});
             const [fullScreenImage, setFullScreenImage] = useState(null);
@@ -130,23 +186,17 @@
                 setIsLoading(false);
             };
 
-            // ① 認証
             useEffect(() => {
                 auth.signInAnonymously().catch(e => {
-                    console.error("認証エラー:", e);
                     setAuthError(true);
                     setIsLoading(false);
                 });
                 const unsubscribe = auth.onAuthStateChanged(user => {
-                    if (user) {
-                        setUser(user);
-                        setAuthError(false);
-                    }
+                    if (user) { setUser(user); setAuthError(false); }
                 });
                 return () => unsubscribe();
             }, []);
 
-            // ② メイン表データの同期
             useEffect(() => {
                 if (!user || useLocalMode) {
                     if (useLocalMode) setIsLoading(false);
@@ -169,17 +219,13 @@
                 return () => unsubscribe();
             }, [user, useLocalMode]);
 
-            // ③ 選択中職人の写真データの同期
             useEffect(() => {
                 if (!selectedWorkerId || !user || useLocalMode) return;
                 
                 const imgRef = db.collection('kawaden_images').doc(selectedWorkerId);
                 const unsubscribe = imgRef.onSnapshot(doc => {
-                    if (doc.exists) {
-                        setWorkerImages(doc.data() || {});
-                    } else {
-                        setWorkerImages({});
-                    }
+                    if (doc.exists) setWorkerImages(doc.data() || {});
+                    else setWorkerImages({});
                 }, e => console.error("画像取得エラー:", e));
                 return () => unsubscribe();
             }, [selectedWorkerId, user, useLocalMode]);
@@ -192,14 +238,42 @@
                 }).catch(handleFirestoreError);
             };
 
-            // 健康診断日の更新
             const updateWorkerHealth = (id, newDate) => {
                 const newWorkers = workers.map(w => w.id === id ? { ...w, healthDate: newDate } : w);
                 setWorkers(newWorkers);
                 updateCloud(newWorkers, null);
             };
 
-            // 画像のアップロード
+            // 🌟 資格の日付詳細を更新するロジック
+            const updateQualDetail = (workerId, qualId, field, value, currentQual) => {
+                const newWorkers = workers.map(w => {
+                    if (w.id !== workerId) return w;
+                    
+                    const details = w.qualDetails || {};
+                    const qDetail = details[qualId] || { isFirst: true };
+                    const updatedQDetail = { ...qDetail, [field]: value };
+                    
+                    // 取得日が変更された、または甲4の種別が変更された場合は自動計算
+                    if (field === 'acquiredDate' || field === 'isFirst') {
+                        const acqDate = field === 'acquiredDate' ? value : qDetail.acquiredDate;
+                        const isFirst = field === 'isFirst' ? value : qDetail.isFirst !== false;
+                        
+                        if (currentQual.isKou4) {
+                            updatedQDetail.expireDate = calcKou4Expire(acqDate, isFirst);
+                        } else if (currentQual.updateIntervalYears) {
+                            updatedQDetail.expireDate = calcNormalExpire(acqDate, currentQual.updateIntervalYears);
+                        }
+                    }
+                    
+                    return {
+                        ...w,
+                        qualDetails: { ...details, [qualId]: updatedQDetail }
+                    };
+                });
+                setWorkers(newWorkers);
+                updateCloud(newWorkers, null);
+            };
+
             const handleImageUpload = async (workerId, qualId, file) => {
                 if (!file) return;
                 try {
@@ -212,7 +286,6 @@
                         [qualId]: compressedBase64
                     }, { merge: true });
                 } catch (e) {
-                    console.error("画像保存エラー", e);
                     alert("画像の保存に失敗しました。");
                 }
             };
@@ -232,7 +305,13 @@
 
             const toggleQual = (workerId, qualId) => {
                 if (isEditMode) return;
-                const newWorkers = workers.map(w => w.id === workerId ? { ...w, quals: w.quals.includes(qualId) ? w.quals.filter(id => id !== qualId) : [...w.quals, qualId] } : w);
+                const newWorkers = workers.map(w => {
+                    if (w.id === workerId) {
+                        const hasQual = w.quals.includes(qualId);
+                        return { ...w, quals: hasQual ? w.quals.filter(id => id !== qualId) : [...w.quals, qualId] };
+                    }
+                    return w;
+                });
                 setWorkers(newWorkers);
                 updateCloud(newWorkers, null);
             };
@@ -280,14 +359,9 @@
                             <p className="text-gray-600 mb-6 leading-relaxed">
                                 金庫の作成は成功しています！<br/>最後に、アプリから読み書きできるように「ルール（鍵）」を設定してください。
                             </p>
-                            
-                            <button 
-                                onClick={() => { setUseLocalMode(true); setIsLoading(false); }} 
-                                className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 transition-colors shadow-lg mb-6 active:scale-95"
-                            >
+                            <button onClick={() => { setUseLocalMode(true); setIsLoading(false); }} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 transition-colors shadow-lg mb-6 active:scale-95">
                                 設定を後回しにして、まずはアプリを試す！
                             </button>
-
                             <div className="bg-gray-100 p-4 rounded-xl text-left text-sm text-gray-700 border border-gray-200">
                                 <p className="font-bold mb-2">【ルールの変更手順】</p>
                                 <ol className="list-decimal list-inside space-y-1 text-xs mb-3 font-bold">
@@ -383,6 +457,10 @@ service cloud.firestore {
                                                             きんでん
                                                         </span>
                                                     )}
+                                                    {/* 🌟 更新が必要な資格には時計マークを表示 */}
+                                                    {q.requiresUpdate && !isEditMode && (
+                                                        <IconClock className="w-3 h-3 text-orange-500 mb-1" title="定期更新が必要です" />
+                                                    )}
                                                     {isEditMode ? (
                                                         <textarea className="text-xs border-2 border-orange-200 p-1 w-8 h-32 outline-none focus:border-orange-500 rounded text-center transition-colors" value={q.name} onChange={(e) => renameItem(q.id, e.target.value, true)} style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }} />
                                                     ) : (
@@ -420,7 +498,6 @@ service cloud.firestore {
                                                     <div className="flex items-center justify-between w-full pr-1">
                                                         <div className="flex flex-col justify-center">
                                                             <span className="font-bold text-gray-800 text-sm">{worker.name}</span>
-                                                            {/* 🌟 健康診断日の表示 */}
                                                             <span className="text-[10px] text-gray-500 font-medium tracking-tighter">
                                                                 健診: <span className={worker.healthDate ? "text-blue-600" : "text-gray-400"}>
                                                                     {worker.healthDate ? worker.healthDate.replace(/-/g, '/') : '未設定'}
@@ -440,8 +517,34 @@ service cloud.firestore {
                                         </td>
                                         {qualifications.map(q => {
                                             const hasQual = worker.quals.includes(q.id);
+                                            
+                                            // 🌟 期限による色分け判定
+                                            let statusColor = 'text-green-600';
+                                            let tooltipText = hasQual ? '取得済み' : '未取得';
+                                            
+                                            if (hasQual && q.requiresUpdate && worker.qualDetails && worker.qualDetails[q.id]) {
+                                                const expDate = worker.qualDetails[q.id].expireDate;
+                                                if (expDate) {
+                                                    const daysLeft = getDaysUntilExpire(expDate);
+                                                    if (daysLeft < 0) {
+                                                        statusColor = 'text-red-600'; // 期限切れ
+                                                        tooltipText = `期限切れ: ${expDate}`;
+                                                    } else if (daysLeft <= 90) {
+                                                        statusColor = 'text-orange-500'; // 3ヶ月以内
+                                                        tooltipText = `更新間近: ${expDate} まで`;
+                                                    } else {
+                                                        tooltipText = `期限: ${expDate} まで`;
+                                                    }
+                                                }
+                                            }
+
                                             return (
-                                                <td key={q.id} onClick={() => toggleQual(worker.id, q.id)} className={`border-b border-r border-gray-300 text-center select-none text-2xl font-bold transition-all ${hasQual ? 'text-green-600' : 'text-gray-200'} ${!isEditMode && 'cursor-pointer hover:bg-blue-50 active:scale-95'} ${q.isKinden && !isEditMode ? 'bg-blue-50/30' : ''}`}>
+                                                <td key={q.id} onClick={() => toggleQual(worker.id, q.id)} 
+                                                    title={tooltipText}
+                                                    className={`border-b border-r border-gray-300 text-center select-none text-2xl font-bold transition-all 
+                                                    ${hasQual ? statusColor : 'text-gray-200'} 
+                                                    ${!isEditMode && 'cursor-pointer hover:bg-blue-50 active:scale-95'} 
+                                                    ${q.isKinden && !isEditMode ? 'bg-blue-50/30' : ''}`}>
                                                     {hasQual ? '◯' : '・'}
                                                 </td>
                                             );
@@ -468,6 +571,7 @@ service cloud.firestore {
                                 {(() => {
                                     const targetWorker = workers.find(w => w.id === selectedWorkerId);
                                     const hasQuals = targetWorker.quals.map(qid => qualifications.find(q => q.id === qid)).filter(Boolean);
+                                    const details = targetWorker.qualDetails || {};
                                     
                                     return (
                                         <>
@@ -483,44 +587,102 @@ service cloud.firestore {
                                                 </p>
                                             </div>
                                             
-                                            <div className="flex-1 overflow-auto pr-2 space-y-3">
+                                            <div className="flex-1 overflow-auto pr-2 space-y-4 pb-4">
                                                 {hasQuals.length === 0 ? (
                                                     <p className="text-gray-500 text-center py-8 font-bold">まだ登録された資格がありません。<br/>表で「◯」を付けてから写真を追加してください。</p>
                                                 ) : (
-                                                    hasQuals.map(q => (
-                                                        <div key={q.id} className="bg-gray-50 p-4 rounded-2xl border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                                            <p className="font-bold text-gray-800 text-lg">{q.name}</p>
-                                                            {workerImages[q.id] ? (
-                                                                <div className="flex items-center gap-4 shrink-0">
-                                                                    <img 
-                                                                        src={workerImages[q.id]} 
-                                                                        alt={q.name} 
-                                                                        className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-xl border-2 border-gray-300 shadow-sm cursor-pointer hover:opacity-80 transition-opacity"
-                                                                        onClick={() => setFullScreenImage(workerImages[q.id])}
-                                                                        title="クリックで拡大"
-                                                                    />
-                                                                    <button onClick={() => handleImageDelete(selectedWorkerId, q.id)} className="text-red-500 text-xs font-bold border border-red-200 px-3 py-2 rounded-lg bg-white hover:bg-red-50 shadow-sm active:scale-95 flex items-center gap-1">
-                                                                        <IconTrash className="w-3 h-3" /> 削除
-                                                                    </button>
+                                                    hasQuals.map(q => {
+                                                        const qDetail = details[q.id] || {};
+                                                        const isKou4First = qDetail.isFirst !== false; // デフォルトは初回
+                                                        
+                                                        return (
+                                                            <div key={q.id} className="bg-white p-4 rounded-2xl border-2 border-gray-100 flex flex-col shadow-sm">
+                                                                <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <p className="font-black text-gray-800 text-lg">{q.name}</p>
+                                                                        {q.requiresUpdate && <span className="bg-orange-100 text-orange-600 text-[10px] px-2 py-0.5 rounded-full font-bold">更新あり</span>}
+                                                                    </div>
+                                                                    {/* 写真アップロードボタン or 表示 */}
+                                                                    {workerImages[q.id] ? (
+                                                                        <div className="flex items-center gap-3 shrink-0">
+                                                                            <img 
+                                                                                src={workerImages[q.id]} 
+                                                                                alt={q.name} 
+                                                                                className="w-12 h-12 object-cover rounded-lg border border-gray-300 shadow-sm cursor-pointer hover:opacity-80 transition-opacity"
+                                                                                onClick={() => setFullScreenImage(workerImages[q.id])}
+                                                                                title="クリックで拡大"
+                                                                            />
+                                                                            <button onClick={() => handleImageDelete(selectedWorkerId, q.id)} className="text-red-500 bg-red-50 p-1.5 rounded-lg hover:bg-red-100 active:scale-95 transition-colors">
+                                                                                <IconTrash className="w-4 h-4" />
+                                                                            </button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <label className="cursor-pointer inline-flex items-center gap-1 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors shadow-sm active:scale-95 shrink-0">
+                                                                            <IconCamera className="w-4 h-4" /> 写真添付
+                                                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleImageUpload(selectedWorkerId, q.id, e.target.files[0])} />
+                                                                        </label>
+                                                                    )}
                                                                 </div>
-                                                            ) : (
-                                                                <label className="cursor-pointer inline-flex items-center justify-center gap-2 bg-white border-2 border-blue-200 px-4 py-3 rounded-xl text-sm font-bold text-blue-700 hover:bg-blue-50 transition-colors shadow-sm active:scale-95 shrink-0">
-                                                                    <IconCamera className="w-5 h-5" />
-                                                                    写真を添付
-                                                                    <input 
-                                                                        type="file" 
-                                                                        accept="image/*" 
-                                                                        capture="environment" 
-                                                                        className="hidden"
-                                                                        onChange={(e) => handleImageUpload(selectedWorkerId, q.id, e.target.files[0])}
-                                                                    />
-                                                                </label>
-                                                            )}
-                                                        </div>
-                                                    ))
+
+                                                                {/* 🌟 期限管理UI */}
+                                                                {q.requiresUpdate && (
+                                                                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 space-y-3">
+                                                                        {q.isKou4 && (
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="text-xs font-bold text-gray-500">種別:</span>
+                                                                                <select 
+                                                                                    value={isKou4First ? 'first' : 'second'} 
+                                                                                    onChange={(e) => updateQualDetail(selectedWorkerId, q.id, 'isFirst', e.target.value === 'first', q)}
+                                                                                    className="border border-gray-300 rounded p-1 text-xs font-bold bg-white text-gray-700 focus:border-blue-500 outline-none"
+                                                                                >
+                                                                                    <option value="first">初回（免状交付から2年以内）</option>
+                                                                                    <option value="second">2回目以降（受講から5年以内）</option>
+                                                                                </select>
+                                                                            </div>
+                                                                        )}
+                                                                        
+                                                                        <div className="flex gap-4">
+                                                                            <div className="flex-1">
+                                                                                <label className="block text-[10px] font-bold text-gray-400 mb-1">
+                                                                                    {q.isKou4 ? (isKou4First ? '免状交付日' : '講習受講日') : '取得・受講日'}
+                                                                                </label>
+                                                                                <input 
+                                                                                    type="date" 
+                                                                                    value={qDetail.acquiredDate || ''} 
+                                                                                    onChange={(e) => updateQualDetail(selectedWorkerId, q.id, 'acquiredDate', e.target.value, q)}
+                                                                                    className="w-full border border-gray-300 rounded-lg p-2 text-sm font-bold text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all" 
+                                                                                />
+                                                                            </div>
+                                                                            <div className="flex-1">
+                                                                                <label className="block text-[10px] font-bold text-gray-400 mb-1 flex justify-between">
+                                                                                    更新期限（予定日）
+                                                                                    {q.updateIntervalYears && <span className="text-blue-500 font-normal">{q.updateIntervalYears}年毎</span>}
+                                                                                </label>
+                                                                                <input 
+                                                                                    type="date" 
+                                                                                    value={qDetail.expireDate || ''} 
+                                                                                    onChange={(e) => updateQualDetail(selectedWorkerId, q.id, 'expireDate', e.target.value, q)}
+                                                                                    className={`w-full border rounded-lg p-2 text-sm font-bold outline-none transition-all
+                                                                                        ${getDaysUntilExpire(qDetail.expireDate) < 0 ? 'border-red-500 text-red-600 bg-red-50' : 
+                                                                                          getDaysUntilExpire(qDetail.expireDate) <= 90 ? 'border-orange-400 text-orange-600 bg-orange-50' : 
+                                                                                          'border-gray-300 text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100'}`} 
+                                                                                />
+                                                                            </div>
+                                                                        </div>
+                                                                        {qDetail.expireDate && getDaysUntilExpire(qDetail.expireDate) < 0 && (
+                                                                            <p className="text-xs text-red-600 font-bold mt-1">※ 更新期限が切れています！</p>
+                                                                        )}
+                                                                        {qDetail.expireDate && getDaysUntilExpire(qDetail.expireDate) >= 0 && getDaysUntilExpire(qDetail.expireDate) <= 90 && (
+                                                                            <p className="text-xs text-orange-600 font-bold mt-1">※ 更新期限まであと3ヶ月以内です</p>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })
                                                 )}
                                             </div>
-                                            <div className="mt-4 pt-4 border-t text-right shrink-0">
+                                            <div className="pt-4 border-t text-right shrink-0">
                                                 <button onClick={() => setSelectedWorkerId(null)} className="px-8 py-3 bg-gray-800 text-white font-bold rounded-2xl shadow-lg hover:bg-gray-700 active:scale-95 transition-all">閉じる</button>
                                             </div>
                                         </>
@@ -548,7 +710,7 @@ service cloud.firestore {
                                 </h2>
                                 <form onSubmit={(e) => {
                                     e.preventDefault(); if (!newWorkerName.trim()) return;
-                                    const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [] }];
+                                    const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [], qualDetails: {} }];
                                     setWorkers(nw); updateCloud(nw, null); setNewWorkerName(''); setShowAddModal(false);
                                 }}>
                                     <div className="mb-8">
