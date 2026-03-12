@@ -115,6 +115,8 @@
         const IconClock = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>);
         const IconZoomIn = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>);
         const IconZoomOut = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>);
+        // 🌟 新規追加アイコン（資格追加用）
+        const IconPlus = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>);
 
         // ==========================================
         // 🔐 Firebase 設定
@@ -171,16 +173,35 @@
             { id: 'w2', name: '石橋 広行', healthDate: '', quals: ['q14', 'q1', 'q4', 'q5', 'q28'], qualDetails: {} }
         ];
 
+        // 🌟 スマホ本体に保存されているデータを取得する機能（オフラインでも消えないように！）
+        const getLocalWorkers = () => {
+            try {
+                const saved = localStorage.getItem('kawaden_workers');
+                return saved ? JSON.parse(saved) : defaultWorkers;
+            } catch (e) {
+                return defaultWorkers;
+            }
+        };
+        const getLocalQuals = () => {
+            try {
+                const saved = localStorage.getItem('kawaden_quals');
+                return saved ? JSON.parse(saved) : defaultQualifications;
+            } catch (e) {
+                return defaultQualifications;
+            }
+        };
+
         function App() {
-            const [qualifications, setQualifications] = useState(defaultQualifications);
-            const [workers, setWorkers] = useState(defaultWorkers);
+            // 初期状態をローカルストレージから読み込むように変更
+            const [qualifications, setQualifications] = useState(getLocalQuals);
+            const [workers, setWorkers] = useState(getLocalWorkers);
+            
             const [showAddModal, setShowAddModal] = useState(false);
             const [newWorkerName, setNewWorkerName] = useState('');
             const [user, setUser] = useState(null);
             const [isLoading, setIsLoading] = useState(true);
             const [isEditMode, setIsEditMode] = useState(false);
             
-            // 🌟 ズーム倍率のState (0.3 ～ 2.0まで許可)
             const [zoomScale, setZoomScale] = useState(1);
 
             const [selectedWorkerId, setSelectedWorkerId] = useState(null);
@@ -260,11 +281,20 @@
                 return () => unsubscribe();
             }, [selectedWorkerId, user, useLocalMode]);
 
+            // 🌟 クラウドと「スマホ本体」の両方に確実に保存する関数
             const updateCloud = (newWorkers, newQuals) => {
-                if (!user || useLocalMode) return;
+                const w = newWorkers || workers;
+                const q = newQuals || qualifications;
+                
+                // オフライン・エラー中でも消えないよう、スマホのブラウザにバックアップ！
+                localStorage.setItem('kawaden_workers', JSON.stringify(w));
+                localStorage.setItem('kawaden_quals', JSON.stringify(q));
+
+                if (!user || useLocalMode) return; // オフラインの時はここでストップ（でも本体には保存されている）
+                
                 db.collection('kawaden_data').doc('main_list').set({
-                    workers: newWorkers || workers,
-                    qualifications: newQuals || qualifications
+                    workers: w,
+                    qualifications: q
                 }).catch(handleFirestoreError);
             };
 
@@ -300,6 +330,24 @@
                 });
                 setWorkers(newWorkers);
                 updateCloud(newWorkers, null);
+            };
+
+            // 🌟 資格を新規作成する関数
+            const handleAddQual = () => {
+                const newQualName = prompt("追加する資格名を入力してください\n（例：フルハーネス型墜落制止用器具）");
+                if (!newQualName || !newQualName.trim()) return;
+                
+                const newQualId = `q${Date.now()}`; // 重複しないIDを自動生成
+                const newQual = { 
+                    id: newQualId, 
+                    name: newQualName.trim(),
+                    requiresUpdate: false,
+                    isKinden: false
+                };
+                
+                const newQuals = [...qualifications, newQual];
+                setQualifications(newQuals);
+                updateCloud(null, newQuals); // すぐに保存
             };
 
             const handleImageUpload = async (workerId, qualId, file) => {
@@ -439,17 +487,15 @@ service cloud.firestore {
                 );
             }
 
-            // 🌟 ズームに応じたセル幅とフォントサイズの計算（限界まで小さくできるように変更）
-            const baseCellWidth = 48; // 基準の列幅(px)
-            const currentCellWidth = Math.max(12, baseCellWidth * zoomScale); // 最小幅を12pxまで解放！
+            const baseCellWidth = 48; 
+            const currentCellWidth = Math.max(12, baseCellWidth * zoomScale); 
             const baseHeaderHeight = 220;
             const currentHeaderHeight = Math.max(80, baseHeaderHeight * zoomScale);
-            const qualFontSize = Math.max(8, 12 * zoomScale); // ヘッダー文字サイズも8pxまで縮小許可
-            const circleFontSize = Math.max(10, 24 * zoomScale); // ◯の文字サイズも10pxまで縮小許可
+            const qualFontSize = Math.max(8, 12 * zoomScale); 
+            const circleFontSize = Math.max(10, 24 * zoomScale); 
 
             return (
                 <div className="h-[100dvh] bg-white flex flex-col font-sans overflow-hidden">
-                    {/* ヘッダー */}
                     <header className={`text-white p-3 sm:p-4 shadow-md flex justify-between items-center z-50 shrink-0 ${isEditMode ? 'bg-orange-600' : 'bg-blue-800'}`}>
                         <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                             <h1 className="text-lg sm:text-xl font-bold tracking-tighter">{isEditMode ? '設定・編集モード' : '川電 資格一覧表'}</h1>
@@ -460,7 +506,6 @@ service cloud.firestore {
                         </div>
                         
                         <div className="flex items-center gap-1 sm:gap-2">
-                            {/* 🌟 ズームコントローラー */}
                             {!isEditMode && (
                                 <div className="flex items-center bg-black/20 rounded-lg p-0.5 mr-1">
                                     <button onClick={() => setZoomScale(z => Math.max(0.3, parseFloat((z - 0.1).toFixed(1))))} className="p-1.5 sm:p-2 hover:bg-white/20 rounded text-white active:scale-95" title="縮小"><IconZoomOut className="w-4 h-4" /></button>
@@ -469,7 +514,18 @@ service cloud.firestore {
                                 </div>
                             )}
 
-                            <button onClick={() => setShowAddModal(true)} className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"><IconUserPlus className="w-5 h-5" /></button>
+                            {/* 🌟 追加機能ボタン群 */}
+                            {!isEditMode && (
+                                <button onClick={() => setShowAddModal(true)} className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"><IconUserPlus className="w-5 h-5" /></button>
+                            )}
+
+                            {isEditMode && (
+                                <button onClick={handleAddQual} className="p-2 bg-white text-blue-600 rounded-lg flex items-center gap-1 font-bold shadow-lg active:scale-95 transition-all mr-1">
+                                    <IconPlus className="w-4 h-4" />
+                                    <span className="hidden sm:inline text-xs">資格追加</span>
+                                </button>
+                            )}
+
                             <button onClick={() => { setIsEditMode(!isEditMode); setZoomScale(1); }} className={`p-2 rounded-lg flex items-center gap-1 font-bold transition-all ${isEditMode ? 'bg-white text-orange-600 scale-105 shadow-lg' : 'bg-white/20 text-white'}`}>
                                 {isEditMode ? <IconCheck className="w-5 h-5" /> : <IconSettings className="w-5 h-5" />}
                                 <span className="hidden sm:inline">{isEditMode ? '完了' : '編集'}</span>
@@ -484,20 +540,16 @@ service cloud.firestore {
                         </div>
                     )}
 
-                    {/* テーブルエリア */}
                     <div className="flex-1 overflow-auto bg-gray-100 relative">
-                        {/* 🌟 修正ポイント：zoomスタイルを撤去し、各セルの幅を直接操作して圧縮する */}
                         <div className="inline-block min-w-full">
                             <table className="w-max min-w-full border-separate border-spacing-0 bg-white">
                                 <thead>
                                     <tr>
-                                        {/* 🌟 氏名欄は「完全固定（160px）」 */}
                                         <th className="sticky top-0 left-0 z-40 bg-gray-200 border-b border-r border-gray-300 p-2 shadow-[1px_1px_0_#d1d5db] text-gray-700 text-sm align-middle"
                                             style={{ width: '160px', minWidth: '160px', maxWidth: '160px' }}>
                                             <div className="flex items-center justify-center h-full">氏名 \ 資格</div>
                                         </th>
                                         
-                                        {/* 🌟 資格列は「zoomScale」に連動して幅が変わる＆はみ出しを隠す */}
                                         {qualifications.map((q, idx) => (
                                             <th key={q.id} 
                                                 className={`sticky top-0 z-30 border-b border-r border-gray-300 p-0 ${q.isKinden ? 'bg-blue-100' : 'bg-gray-100'}`}
@@ -513,7 +565,6 @@ service cloud.firestore {
                                                     )}
                                                     
                                                     <div className="flex-1 flex flex-col items-center justify-end gap-1 w-full overflow-hidden">
-                                                        {/* 🌟 きんでんマークは80%以下で「K」一文字に変わる */}
                                                         {q.isKinden && !isEditMode && (
                                                             <span className="bg-blue-600 text-white rounded whitespace-nowrap flex items-center justify-center leading-none mt-1" 
                                                                   style={{ 
@@ -547,7 +598,6 @@ service cloud.firestore {
                                         const healthStatus = getHealthStatus(worker.healthDate);
                                         return (
                                             <tr key={worker.id} className="transition-colors hover:bg-yellow-50">
-                                                {/* 🌟 氏名欄は完全固定 */}
                                                 <td className="sticky left-0 z-20 bg-white border-b border-r border-gray-300 p-2 shadow-[1px_0_0_#d1d5db] whitespace-nowrap"
                                                     style={{ width: '160px', minWidth: '160px', maxWidth: '160px' }}>
                                                     <div className="flex items-center gap-2">
@@ -584,7 +634,6 @@ service cloud.firestore {
                                                     </div>
                                                 </td>
                                                 
-                                                {/* 🌟 資格セルも強制圧縮 */}
                                                 {qualifications.map(q => {
                                                     const hasQual = worker.quals.includes(q.id);
                                                     let statusColor = 'text-green-600';
@@ -640,7 +689,6 @@ service cloud.firestore {
                         </div>
                     </div>
 
-                    {/* モーダル群（変更なし） */}
                     {selectedWorkerId && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-2xl border border-white/20 max-h-[90vh] flex flex-col">
@@ -747,16 +795,7 @@ service cloud.firestore {
                         </div>
                     )}
 
-                    {/* 写真拡大表示モーダル */}
-                    {fullScreenImage && (
-                        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[200] p-4 backdrop-blur-md" onClick={() => setFullScreenImage(null)}>
-                            <img src={fullScreenImage} className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
-                            <button className="absolute top-6 right-6 text-white bg-black/50 p-3 rounded-full hover:bg-white/20 transition-colors"><IconX className="w-6 h-6" /></button>
-                            <p className="absolute bottom-6 text-white/50 text-sm font-bold">画面をタップして閉じる</p>
-                        </div>
-                    )}
-
-                    {/* 新規職人追加モーダル */}
+                    {/* 🌟 修正ポイント：職人の確実な追加処理 */}
                     {showAddModal && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-white/20">
@@ -764,7 +803,8 @@ service cloud.firestore {
                                     <IconUserPlus className="text-blue-600" /> 職人の新規追加
                                 </h2>
                                 <form onSubmit={(e) => {
-                                    e.preventDefault(); if (!newWorkerName.trim()) return;
+                                    e.preventDefault(); 
+                                    if (!newWorkerName.trim()) return;
                                     const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [], qualDetails: {} }];
                                     setWorkers(nw); updateCloud(nw, null); setNewWorkerName(''); setShowAddModal(false);
                                 }}>
@@ -774,7 +814,18 @@ service cloud.firestore {
                                     </div>
                                     <div className="flex justify-end gap-3 font-bold">
                                         <button type="button" onClick={() => setShowAddModal(false)} className="px-6 py-2 text-gray-400 hover:text-gray-600 transition-colors">戻る</button>
-                                        <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform">追加する</button>
+                                        <button 
+                                            type="button" 
+                                            onClick={(e) => {
+                                                e.preventDefault(); 
+                                                if (!newWorkerName.trim()) return;
+                                                const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [], qualDetails: {} }];
+                                                setWorkers(nw); updateCloud(nw, null); setNewWorkerName(''); setShowAddModal(false);
+                                            }} 
+                                            className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform"
+                                        >
+                                            追加する
+                                        </button>
                                     </div>
                                 </form>
                             </div>
