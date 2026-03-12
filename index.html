@@ -115,7 +115,6 @@
         const IconClock = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>);
         const IconZoomIn = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>);
         const IconZoomOut = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>);
-        // 🌟 新規追加アイコン（資格追加用）
         const IconPlus = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>);
 
         // ==========================================
@@ -173,7 +172,7 @@
             { id: 'w2', name: '石橋 広行', healthDate: '', quals: ['q14', 'q1', 'q4', 'q5', 'q28'], qualDetails: {} }
         ];
 
-        // 🌟 スマホ本体に保存されているデータを取得する機能（オフラインでも消えないように！）
+        // 🌟 スマホ本体からデータを取得する（リロード時に消えないようにする要）
         const getLocalWorkers = () => {
             try {
                 const saved = localStorage.getItem('kawaden_workers');
@@ -192,18 +191,21 @@
         };
 
         function App() {
-            // 初期状態をローカルストレージから読み込むように変更
-            const [qualifications, setQualifications] = useState(getLocalQuals);
-            const [workers, setWorkers] = useState(getLocalWorkers);
+            const [qualifications, setQualifications] = useState(getLocalQuals());
+            const [workers, setWorkers] = useState(getLocalWorkers());
             
             const [showAddModal, setShowAddModal] = useState(false);
             const [newWorkerName, setNewWorkerName] = useState('');
+            
+            // 🌟 資格追加用のモーダル用State
+            const [showAddQualModal, setShowAddQualModal] = useState(false);
+            const [newQualName, setNewQualName] = useState('');
+
             const [user, setUser] = useState(null);
             const [isLoading, setIsLoading] = useState(true);
             const [isEditMode, setIsEditMode] = useState(false);
             
             const [zoomScale, setZoomScale] = useState(1);
-
             const [selectedWorkerId, setSelectedWorkerId] = useState(null);
             const [workerImages, setWorkerImages] = useState({});
             const [fullScreenImage, setFullScreenImage] = useState(null);
@@ -262,7 +264,8 @@
                         setWorkers(data.workers || defaultWorkers);
                         setIsLoading(false);
                     } else {
-                        docRef.set({ qualifications: defaultQualifications, workers: defaultWorkers })
+                        // 🌟 【最重要修正】金庫が空っぽだった場合は、初期データではなく「今スマホにあるデータ」をクラウドにアップロードする！
+                        docRef.set({ qualifications: getLocalQuals(), workers: getLocalWorkers() })
                              .then(() => setIsLoading(false))
                              .catch(handleFirestoreError);
                     }
@@ -281,16 +284,16 @@
                 return () => unsubscribe();
             }, [selectedWorkerId, user, useLocalMode]);
 
-            // 🌟 クラウドと「スマホ本体」の両方に確実に保存する関数
+            // 🌟 本体とクラウドへの確実な保存処理
             const updateCloud = (newWorkers, newQuals) => {
                 const w = newWorkers || workers;
                 const q = newQuals || qualifications;
                 
-                // オフライン・エラー中でも消えないよう、スマホのブラウザにバックアップ！
+                // 【絶対保存】オフラインでもリロードで消えないようにスマホ本体に即時保存
                 localStorage.setItem('kawaden_workers', JSON.stringify(w));
                 localStorage.setItem('kawaden_quals', JSON.stringify(q));
 
-                if (!user || useLocalMode) return; // オフラインの時はここでストップ（でも本体には保存されている）
+                if (!user || useLocalMode) return; 
                 
                 db.collection('kawaden_data').doc('main_list').set({
                     workers: w,
@@ -332,12 +335,12 @@
                 updateCloud(newWorkers, null);
             };
 
-            // 🌟 資格を新規作成する関数
-            const handleAddQual = () => {
-                const newQualName = prompt("追加する資格名を入力してください\n（例：フルハーネス型墜落制止用器具）");
-                if (!newQualName || !newQualName.trim()) return;
+            // 🌟 新規資格の追加処理
+            const handleAddQualSubmit = (e) => {
+                e.preventDefault();
+                if (!newQualName.trim()) return;
                 
-                const newQualId = `q${Date.now()}`; // 重複しないIDを自動生成
+                const newQualId = `q${Date.now()}`;
                 const newQual = { 
                     id: newQualId, 
                     name: newQualName.trim(),
@@ -347,7 +350,9 @@
                 
                 const newQuals = [...qualifications, newQual];
                 setQualifications(newQuals);
-                updateCloud(null, newQuals); // すぐに保存
+                updateCloud(null, newQuals);
+                setNewQualName('');
+                setShowAddQualModal(false);
             };
 
             const handleImageUpload = async (workerId, qualId, file) => {
@@ -399,18 +404,6 @@
                 [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
                 setList(newList);
                 if (isQual) updateCloud(null, newList); else updateCloud(newList, null);
-            };
-
-            const renameItem = (id, newName, isQual) => {
-                if (isQual) {
-                    const newList = qualifications.map(q => q.id === id ? { ...q, name: newName } : q);
-                    setQualifications(newList);
-                    updateCloud(null, newList);
-                } else {
-                    const newList = workers.map(w => w.id === id ? { ...w, name: newName } : w);
-                    setWorkers(newList);
-                    updateCloud(newList, null);
-                }
             };
 
             const deleteItem = (id, isQual) => {
@@ -514,13 +507,13 @@ service cloud.firestore {
                                 </div>
                             )}
 
-                            {/* 🌟 追加機能ボタン群 */}
                             {!isEditMode && (
                                 <button onClick={() => setShowAddModal(true)} className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"><IconUserPlus className="w-5 h-5" /></button>
                             )}
 
+                            {/* 🌟 資格追加ボタンの表示 */}
                             {isEditMode && (
-                                <button onClick={handleAddQual} className="p-2 bg-white text-blue-600 rounded-lg flex items-center gap-1 font-bold shadow-lg active:scale-95 transition-all mr-1">
+                                <button onClick={() => setShowAddQualModal(true)} className="p-2 bg-white text-blue-600 rounded-lg flex items-center gap-1 font-bold shadow-lg active:scale-95 transition-all mr-1">
                                     <IconPlus className="w-4 h-4" />
                                     <span className="hidden sm:inline text-xs">資格追加</span>
                                 </button>
@@ -579,10 +572,17 @@ service cloud.firestore {
                                                                        style={{ width: `${Math.max(10, 14 * zoomScale)}px`, height: `${Math.max(10, 14 * zoomScale)}px` }} 
                                                                        title="定期更新が必要です" />
                                                         )}
+                                                        {/* 🌟 修正ポイント：入力中の文字リセットバグを解消 */}
                                                         {isEditMode ? (
-                                                            <textarea className="border border-orange-200 outline-none focus:border-orange-500 rounded text-center" 
+                                                            <textarea className="border border-orange-200 outline-none focus:border-orange-500 rounded text-center transition-colors" 
                                                                       style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: '10px', padding: '2px', width: '24px', height: '100px' }} 
-                                                                      value={q.name} onChange={(e) => renameItem(q.id, e.target.value, true)} />
+                                                                      value={q.name} 
+                                                                      onChange={(e) => {
+                                                                          const newQuals = qualifications.map(qual => qual.id === q.id ? { ...qual, name: e.target.value } : qual);
+                                                                          setQualifications(newQuals);
+                                                                      }} 
+                                                                      onBlur={() => updateCloud(null, qualifications)}
+                                                            />
                                                         ) : (
                                                             <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: `${qualFontSize}px` }} 
                                                                   className="font-black tracking-widest text-gray-700 leading-none">{q.name}</span>
@@ -609,7 +609,16 @@ service cloud.firestore {
                                                         )}
                                                         {isEditMode ? (
                                                             <div className="flex flex-col gap-1 w-full pr-1">
-                                                                <input className="border-2 border-orange-200 px-1.5 py-0.5 w-full text-sm font-bold rounded focus:border-orange-500 outline-none" value={worker.name} onChange={(e) => renameItem(worker.id, e.target.value, false)} placeholder="氏名" />
+                                                                {/* 🌟 修正ポイント：入力中の文字リセットバグを解消 */}
+                                                                <input className="border-2 border-orange-200 px-1.5 py-0.5 w-full text-sm font-bold rounded focus:border-orange-500 outline-none" 
+                                                                       value={worker.name} 
+                                                                       onChange={(e) => {
+                                                                           const newWorkers = workers.map(w => w.id === worker.id ? { ...w, name: e.target.value } : w);
+                                                                           setWorkers(newWorkers);
+                                                                       }} 
+                                                                       onBlur={() => updateCloud(workers, null)}
+                                                                       placeholder="氏名" 
+                                                                />
                                                                 <div className="flex items-center gap-1">
                                                                     <span className="text-[10px] font-bold text-gray-500">健診:</span>
                                                                     <input type="date" className="border-2 border-orange-200 px-1 w-full text-xs rounded focus:border-orange-500 outline-none text-gray-600" value={worker.healthDate || ''} onChange={(e) => updateWorkerHealth(worker.id, e.target.value)} />
@@ -689,6 +698,7 @@ service cloud.firestore {
                         </div>
                     </div>
 
+                    {/* 職人詳細・写真添付モーダル */}
                     {selectedWorkerId && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-2xl border border-white/20 max-h-[90vh] flex flex-col">
@@ -795,7 +805,16 @@ service cloud.firestore {
                         </div>
                     )}
 
-                    {/* 🌟 修正ポイント：職人の確実な追加処理 */}
+                    {/* 写真拡大表示モーダル */}
+                    {fullScreenImage && (
+                        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[200] p-4 backdrop-blur-md" onClick={() => setFullScreenImage(null)}>
+                            <img src={fullScreenImage} className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
+                            <button className="absolute top-6 right-6 text-white bg-black/50 p-3 rounded-full hover:bg-white/20 transition-colors"><IconX className="w-6 h-6" /></button>
+                            <p className="absolute bottom-6 text-white/50 text-sm font-bold">画面をタップして閉じる</p>
+                        </div>
+                    )}
+
+                    {/* 🌟 修正ポイント：職人の追加処理をフォームの送信イベントに一本化 */}
                     {showAddModal && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-white/20">
@@ -814,18 +833,28 @@ service cloud.firestore {
                                     </div>
                                     <div className="flex justify-end gap-3 font-bold">
                                         <button type="button" onClick={() => setShowAddModal(false)} className="px-6 py-2 text-gray-400 hover:text-gray-600 transition-colors">戻る</button>
-                                        <button 
-                                            type="button" 
-                                            onClick={(e) => {
-                                                e.preventDefault(); 
-                                                if (!newWorkerName.trim()) return;
-                                                const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [], qualDetails: {} }];
-                                                setWorkers(nw); updateCloud(nw, null); setNewWorkerName(''); setShowAddModal(false);
-                                            }} 
-                                            className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform"
-                                        >
-                                            追加する
-                                        </button>
+                                        <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform">追加する</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 🌟 新規追加：資格の追加専用モーダル */}
+                    {showAddQualModal && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                            <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-white/20">
+                                <h2 className="text-xl font-black mb-6 text-gray-800 flex items-center gap-2">
+                                    <IconPlus className="text-blue-600" /> 資格の新規追加
+                                </h2>
+                                <form onSubmit={handleAddQualSubmit}>
+                                    <div className="mb-8">
+                                        <label className="block text-xs font-bold text-gray-400 mb-2 px-1 uppercase tracking-widest">資格名</label>
+                                        <input type="text" value={newQualName} onChange={e => setNewQualName(e.target.value)} placeholder="例：フルハーネス型墜落制止用器具" className="w-full border-2 border-gray-100 p-3 rounded-2xl outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-50 transition-all text-sm font-bold" autoFocus />
+                                    </div>
+                                    <div className="flex justify-end gap-3 font-bold">
+                                        <button type="button" onClick={() => setShowAddQualModal(false)} className="px-6 py-2 text-gray-400 hover:text-gray-600 transition-colors">戻る</button>
+                                        <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform">追加する</button>
                                     </div>
                                 </form>
                             </div>
