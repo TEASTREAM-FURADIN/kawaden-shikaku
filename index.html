@@ -117,6 +117,47 @@
         const IconPlus = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>);
 
         // ==========================================
+        // 🌟 確実な保存のための「入力専用部品」
+        // ==========================================
+        const EditableWorkerName = ({ worker, renameItem }) => {
+            const [name, setName] = useState(worker.name);
+            useEffect(() => { setName(worker.name); }, [worker.name]);
+            const handleBlur = () => { if (name !== worker.name) renameItem(worker.id, name, false); };
+            return (
+                <input 
+                    className="border-2 border-orange-200 px-1.5 py-0.5 w-full text-sm font-bold rounded focus:border-orange-500 outline-none transition-colors" 
+                    value={name} onChange={(e) => setName(e.target.value)} onBlur={handleBlur} placeholder="氏名" 
+                />
+            );
+        };
+
+        const EditableHealthDate = ({ worker, updateWorkerHealth }) => {
+            const [date, setDate] = useState(worker.healthDate || '');
+            useEffect(() => { setDate(worker.healthDate || ''); }, [worker.healthDate]);
+            const handleBlur = () => { if (date !== (worker.healthDate || '')) updateWorkerHealth(worker.id, date); };
+            return (
+                <input 
+                    type="date" 
+                    className="border-2 border-orange-200 px-1 w-full text-xs rounded focus:border-orange-500 outline-none text-gray-600" 
+                    value={date} onChange={(e) => setDate(e.target.value)} onBlur={handleBlur} 
+                />
+            );
+        };
+
+        const EditableQualName = ({ qual, renameItem }) => {
+            const [name, setName] = useState(qual.name);
+            useEffect(() => { setName(qual.name); }, [qual.name]);
+            const handleBlur = () => { if (name !== qual.name) renameItem(qual.id, name, true); };
+            return (
+                <textarea 
+                    className="border border-orange-200 outline-none focus:border-orange-500 rounded text-center transition-colors" 
+                    style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: '10px', padding: '2px', width: '24px', height: '100px' }} 
+                    value={name} onChange={(e) => setName(e.target.value)} onBlur={handleBlur} 
+                />
+            );
+        };
+
+        // ==========================================
         // 🔐 Firebase 設定
         // ==========================================
         const firebaseConfig = {
@@ -171,13 +212,20 @@
             { id: 'w2', name: '石橋 広行', healthDate: '', quals: ['q14', 'q1', 'q4', 'q5', 'q28'], qualDetails: {} }
         ];
 
-        // 🌟 修正①：タイムスタンプ付きでローカルデータを取得する仕組み（古いクラウドデータに上書きされないため）
         const getLocalData = () => {
             try {
                 const saved = localStorage.getItem('kawaden_data');
                 return saved ? JSON.parse(saved) : { workers: defaultWorkers, qualifications: defaultQualifications, lastUpdated: 0 };
             } catch (e) {
                 return { workers: defaultWorkers, qualifications: defaultQualifications, lastUpdated: 0 };
+            }
+        };
+
+        const saveToLocal = (data) => {
+            try {
+                localStorage.setItem('kawaden_data', JSON.stringify(data));
+            } catch (e) {
+                console.error("ローカル保存エラー", e);
             }
         };
 
@@ -241,11 +289,9 @@
                     if (doc.exists) {
                         const remoteData = doc.data();
                         const localData = getLocalData();
-                        
                         const remoteTime = remoteData.lastUpdated || 0;
                         const localTime = localData.lastUpdated || 0;
                         
-                        // 🌟 修正②：ローカル（スマホ）のデータの方が新しい場合は、クラウドの古いデータを無視して上書きする！
                         if (localTime > remoteTime) {
                             docRef.set(localData).catch(e => console.error(e));
                             setQualifications(localData.qualifications);
@@ -264,12 +310,7 @@
                             
                             setQualifications(mergedQuals);
                             setWorkers(remoteData.workers || defaultWorkers);
-                            
-                            localStorage.setItem('kawaden_data', JSON.stringify({
-                                qualifications: mergedQuals,
-                                workers: remoteData.workers || defaultWorkers,
-                                lastUpdated: remoteTime
-                            }));
+                            saveToLocal({ qualifications: mergedQuals, workers: remoteData.workers || defaultWorkers, lastUpdated: remoteTime });
                         }
                         setIsLoading(false);
                     } else {
@@ -292,30 +333,26 @@
                 return () => unsubscribe();
             }, [selectedWorkerId, user, useLocalMode]);
 
-            // 🌟 タイムスタンプを付与して保存する
+            // 🌟 【最重要修正】updateCloudには常に「最新の全体データ」を渡して確実に保存する！
             const updateCloud = (newWorkers, newQuals) => {
-                const w = newWorkers || workers;
-                const q = newQuals || qualifications;
                 const timestamp = Date.now();
+                const localData = { workers: newWorkers, qualifications: newQuals, lastUpdated: timestamp };
                 
-                const localData = { workers: w, qualifications: q, lastUpdated: timestamp };
-                localStorage.setItem('kawaden_data', JSON.stringify(localData));
+                saveToLocal(localData); // スマホ本体に絶対保存
 
                 if (!user || useLocalMode) return; 
-                
                 db.collection('kawaden_data').doc('main_list').set(localData).catch(handleFirestoreError);
             };
 
             const updateWorkerHealth = (id, newDate) => {
                 const newWorkers = workers.map(w => w.id === id ? { ...w, healthDate: newDate } : w);
                 setWorkers(newWorkers);
-                updateCloud(newWorkers, null);
+                updateCloud(newWorkers, qualifications);
             };
 
             const updateQualDetail = (workerId, qualId, field, value, currentQual) => {
                 const newWorkers = workers.map(w => {
                     if (w.id !== workerId) return w;
-                    
                     const details = w.qualDetails || {};
                     const qDetail = details[qualId] || { isFirst: true };
                     const updatedQDetail = { ...qDetail, [field]: value };
@@ -323,42 +360,37 @@
                     if (field === 'acquiredDate' || field === 'isFirst') {
                         const acqDate = field === 'acquiredDate' ? value : qDetail.acquiredDate;
                         const isFirst = field === 'isFirst' ? value : qDetail.isFirst !== false;
-                        
                         if (currentQual.isKou4) {
                             updatedQDetail.expireDate = calcKou4Expire(acqDate, isFirst);
                         } else if (currentQual.updateIntervalYears) {
                             updatedQDetail.expireDate = calcNormalExpire(acqDate, currentQual.updateIntervalYears);
                         }
                     }
-                    
-                    return {
-                        ...w,
-                        qualDetails: { ...details, [qualId]: updatedQDetail }
-                    };
+                    return { ...w, qualDetails: { ...details, [qualId]: updatedQDetail } };
                 });
                 setWorkers(newWorkers);
-                updateCloud(newWorkers, null);
+                updateCloud(newWorkers, qualifications);
             };
 
-            // 🌟 修正③：職人追加処理（キーボードが開いていても動くようにイベントを調整）
+            // 🌟 修正：職人追加処理（確実なイベント発火）
             const handleAddWorkerSubmit = (e) => {
                 if (e) e.preventDefault();
                 if (!newWorkerName.trim()) return;
                 const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [], qualDetails: {} }];
                 setWorkers(nw); 
-                updateCloud(nw, null); 
+                updateCloud(nw, qualifications); 
                 setNewWorkerName(''); 
                 setShowAddModal(false);
             };
 
-            // 🌟 修正③：資格追加処理
+            // 🌟 修正：資格追加処理（確実なイベント発火）
             const handleAddQualSubmit = (e) => {
                 if (e) e.preventDefault();
                 if (!newQualName.trim()) return;
                 const newQual = { id: `q${Date.now()}`, name: newQualName.trim(), requiresUpdate: false, isKinden: false };
                 const newQuals = [...qualifications, newQual];
                 setQualifications(newQuals);
-                updateCloud(null, newQuals);
+                updateCloud(workers, newQuals);
                 setNewQualName('');
                 setShowAddQualModal(false);
             };
@@ -398,7 +430,7 @@
                     return w;
                 });
                 setWorkers(newWorkers);
-                updateCloud(newWorkers, null);
+                updateCloud(newWorkers, qualifications);
             };
 
             const moveItem = (list, setList, index, direction, isQual) => {
@@ -407,18 +439,22 @@
                 if (targetIndex < 0 || targetIndex >= newList.length) return;
                 [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
                 setList(newList);
-                if (isQual) updateCloud(null, newList); else updateCloud(newList, null);
+                if (isQual) {
+                    updateCloud(workers, newList);
+                } else {
+                    updateCloud(newList, qualifications);
+                }
             };
 
             const renameItem = (id, newName, isQual) => {
                 if (isQual) {
                     const newList = qualifications.map(q => q.id === id ? { ...q, name: newName } : q);
                     setQualifications(newList);
-                    updateCloud(null, newList);
+                    updateCloud(workers, newList);
                 } else {
                     const newList = workers.map(w => w.id === id ? { ...w, name: newName } : w);
                     setWorkers(newList);
-                    updateCloud(newList, null);
+                    updateCloud(newList, qualifications);
                 }
             };
 
@@ -427,11 +463,11 @@
                 if (isQual) {
                     const newList = qualifications.filter(q => q.id !== id);
                     setQualifications(newList);
-                    updateCloud(null, newList);
+                    updateCloud(workers, newList);
                 } else {
                     const newList = workers.filter(w => w.id !== id);
                     setWorkers(newList);
-                    updateCloud(newList, null);
+                    updateCloud(newList, qualifications);
                 }
             };
 
@@ -587,15 +623,8 @@ service cloud.firestore {
                                                                        style={{ width: `${Math.max(10, 14 * zoomScale)}px`, height: `${Math.max(10, 14 * zoomScale)}px` }} 
                                                                        title="定期更新が必要です" />
                                                         )}
-                                                        {/* 🌟 修正④：文字の入力状態がリセットされないよう defaultValue と onBlur で保存 */}
                                                         {isEditMode ? (
-                                                            <textarea className="border border-orange-200 outline-none focus:border-orange-500 rounded text-center transition-colors" 
-                                                                      style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: '10px', padding: '2px', width: '24px', height: '100px' }} 
-                                                                      defaultValue={q.name} 
-                                                                      onBlur={(e) => {
-                                                                          if(e.target.value !== q.name) renameItem(q.id, e.target.value, true);
-                                                                      }} 
-                                                            />
+                                                            <EditableQualName qual={q} renameItem={renameItem} />
                                                         ) : (
                                                             <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: `${qualFontSize}px` }} 
                                                                   className="font-black tracking-widest text-gray-700 leading-none">{q.name}</span>
@@ -622,17 +651,10 @@ service cloud.firestore {
                                                         )}
                                                         {isEditMode ? (
                                                             <div className="flex flex-col gap-1 w-full pr-1">
-                                                                {/* 🌟 修正④：文字の入力状態がリセットされないよう defaultValue と onBlur で保存 */}
-                                                                <input className="border-2 border-orange-200 px-1.5 py-0.5 w-full text-sm font-bold rounded focus:border-orange-500 outline-none" 
-                                                                       defaultValue={worker.name} 
-                                                                       onBlur={(e) => {
-                                                                           if(e.target.value !== worker.name) renameItem(worker.id, e.target.value, false);
-                                                                       }} 
-                                                                       placeholder="氏名" 
-                                                                />
+                                                                <EditableWorkerName worker={worker} renameItem={renameItem} />
                                                                 <div className="flex items-center gap-1">
                                                                     <span className="text-[10px] font-bold text-gray-500">健診:</span>
-                                                                    <input type="date" className="border-2 border-orange-200 px-1 w-full text-xs rounded focus:border-orange-500 outline-none text-gray-600" value={worker.healthDate || ''} onChange={(e) => updateWorkerHealth(worker.id, e.target.value)} />
+                                                                    <EditableHealthDate worker={worker} updateWorkerHealth={updateWorkerHealth} />
                                                                 </div>
                                                                 <button onClick={() => deleteItem(worker.id, false)} className="text-[10px] text-red-500 text-left font-bold flex items-center gap-0.5 mt-1">
                                                                     <IconTrash className="w-2.5 h-2.5" /> 削除
@@ -825,7 +847,7 @@ service cloud.firestore {
                         </div>
                     )}
 
-                    {/* 🌟 修正⑤：確実なクリックイベントの補足 */}
+                    {/* 🌟 確実な追加ボタン（onTouchStart/onMouseDown対応） */}
                     {showAddModal && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-white/20">
@@ -841,8 +863,8 @@ service cloud.firestore {
                                         <button type="button" onClick={() => setShowAddModal(false)} className="px-6 py-2 text-gray-400 hover:text-gray-600 transition-colors">戻る</button>
                                         <button 
                                             type="button" 
-                                            onPointerDown={e => e.preventDefault()} 
-                                            onClick={handleAddWorkerSubmit} 
+                                            onMouseDown={(e) => { e.preventDefault(); handleAddWorkerSubmit(e); }}
+                                            onTouchStart={(e) => { e.preventDefault(); handleAddWorkerSubmit(e); }}
                                             className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform"
                                         >
                                             追加する
@@ -853,7 +875,7 @@ service cloud.firestore {
                         </div>
                     )}
 
-                    {/* 🌟 修正⑤：確実なクリックイベントの補足 */}
+                    {/* 🌟 確実な追加ボタン（資格追加用） */}
                     {showAddQualModal && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-white/20">
@@ -869,8 +891,8 @@ service cloud.firestore {
                                         <button type="button" onClick={() => setShowAddQualModal(false)} className="px-6 py-2 text-gray-400 hover:text-gray-600 transition-colors">戻る</button>
                                         <button 
                                             type="button" 
-                                            onPointerDown={e => e.preventDefault()} 
-                                            onClick={handleAddQualSubmit} 
+                                            onMouseDown={(e) => { e.preventDefault(); handleAddQualSubmit(e); }}
+                                            onTouchStart={(e) => { e.preventDefault(); handleAddQualSubmit(e); }}
                                             className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform"
                                         >
                                             追加する
