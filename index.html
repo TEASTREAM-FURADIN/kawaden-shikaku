@@ -78,7 +78,6 @@
             return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         };
 
-        // 🌟 健康診断の期限判定ロジック
         const getHealthStatus = (dateStr) => {
             if (!dateStr) return { text: '未設定', color: 'text-gray-400', bg: '', isAlert: false };
             const today = new Date();
@@ -172,32 +171,24 @@
             { id: 'w2', name: '石橋 広行', healthDate: '', quals: ['q14', 'q1', 'q4', 'q5', 'q28'], qualDetails: {} }
         ];
 
-        // 🌟 スマホ本体からデータを取得する（リロード時に消えないようにする要）
-        const getLocalWorkers = () => {
+        // 🌟 修正①：タイムスタンプ付きでローカルデータを取得する仕組み（古いクラウドデータに上書きされないため）
+        const getLocalData = () => {
             try {
-                const saved = localStorage.getItem('kawaden_workers');
-                return saved ? JSON.parse(saved) : defaultWorkers;
+                const saved = localStorage.getItem('kawaden_data');
+                return saved ? JSON.parse(saved) : { workers: defaultWorkers, qualifications: defaultQualifications, lastUpdated: 0 };
             } catch (e) {
-                return defaultWorkers;
-            }
-        };
-        const getLocalQuals = () => {
-            try {
-                const saved = localStorage.getItem('kawaden_quals');
-                return saved ? JSON.parse(saved) : defaultQualifications;
-            } catch (e) {
-                return defaultQualifications;
+                return { workers: defaultWorkers, qualifications: defaultQualifications, lastUpdated: 0 };
             }
         };
 
         function App() {
-            const [qualifications, setQualifications] = useState(getLocalQuals());
-            const [workers, setWorkers] = useState(getLocalWorkers());
+            const initialData = getLocalData();
+            const [qualifications, setQualifications] = useState(initialData.qualifications);
+            const [workers, setWorkers] = useState(initialData.workers);
             
             const [showAddModal, setShowAddModal] = useState(false);
             const [newWorkerName, setNewWorkerName] = useState('');
             
-            // 🌟 資格追加用のモーダル用State
             const [showAddQualModal, setShowAddQualModal] = useState(false);
             const [newQualName, setNewQualName] = useState('');
 
@@ -248,24 +239,42 @@
                 const docRef = db.collection('kawaden_data').doc('main_list');
                 const unsubscribe = docRef.onSnapshot(doc => {
                     if (doc.exists) {
-                        const data = doc.data();
-                        const loadedQuals = data.qualifications || defaultQualifications;
-                        const mergedQuals = loadedQuals.map(loadedQual => {
-                            const defaultQual = defaultQualifications.find(dq => dq.id === loadedQual.id);
-                            return defaultQual ? { 
-                                ...loadedQual, 
-                                requiresUpdate: defaultQual.requiresUpdate, 
-                                updateIntervalYears: defaultQual.updateIntervalYears, 
-                                isKou4: defaultQual.isKou4 
-                            } : loadedQual;
-                        });
+                        const remoteData = doc.data();
+                        const localData = getLocalData();
                         
-                        setQualifications(mergedQuals);
-                        setWorkers(data.workers || defaultWorkers);
+                        const remoteTime = remoteData.lastUpdated || 0;
+                        const localTime = localData.lastUpdated || 0;
+                        
+                        // 🌟 修正②：ローカル（スマホ）のデータの方が新しい場合は、クラウドの古いデータを無視して上書きする！
+                        if (localTime > remoteTime) {
+                            docRef.set(localData).catch(e => console.error(e));
+                            setQualifications(localData.qualifications);
+                            setWorkers(localData.workers);
+                        } else {
+                            const loadedQuals = remoteData.qualifications || defaultQualifications;
+                            const mergedQuals = loadedQuals.map(loadedQual => {
+                                const defaultQual = defaultQualifications.find(dq => dq.id === loadedQual.id);
+                                return defaultQual ? { 
+                                    ...loadedQual, 
+                                    requiresUpdate: defaultQual.requiresUpdate, 
+                                    updateIntervalYears: defaultQual.updateIntervalYears, 
+                                    isKou4: defaultQual.isKou4 
+                                } : loadedQual;
+                            });
+                            
+                            setQualifications(mergedQuals);
+                            setWorkers(remoteData.workers || defaultWorkers);
+                            
+                            localStorage.setItem('kawaden_data', JSON.stringify({
+                                qualifications: mergedQuals,
+                                workers: remoteData.workers || defaultWorkers,
+                                lastUpdated: remoteTime
+                            }));
+                        }
                         setIsLoading(false);
                     } else {
-                        // 🌟 【最重要修正】金庫が空っぽだった場合は、初期データではなく「今スマホにあるデータ」をクラウドにアップロードする！
-                        docRef.set({ qualifications: getLocalQuals(), workers: getLocalWorkers() })
+                        const localData = getLocalData();
+                        docRef.set(localData)
                              .then(() => setIsLoading(false))
                              .catch(handleFirestoreError);
                     }
@@ -275,7 +284,6 @@
 
             useEffect(() => {
                 if (!selectedWorkerId || !user || useLocalMode) return;
-                
                 const imgRef = db.collection('kawaden_images').doc(selectedWorkerId);
                 const unsubscribe = imgRef.onSnapshot(doc => {
                     if (doc.exists) setWorkerImages(doc.data() || {});
@@ -284,21 +292,18 @@
                 return () => unsubscribe();
             }, [selectedWorkerId, user, useLocalMode]);
 
-            // 🌟 本体とクラウドへの確実な保存処理
+            // 🌟 タイムスタンプを付与して保存する
             const updateCloud = (newWorkers, newQuals) => {
                 const w = newWorkers || workers;
                 const q = newQuals || qualifications;
+                const timestamp = Date.now();
                 
-                // 【絶対保存】オフラインでもリロードで消えないようにスマホ本体に即時保存
-                localStorage.setItem('kawaden_workers', JSON.stringify(w));
-                localStorage.setItem('kawaden_quals', JSON.stringify(q));
+                const localData = { workers: w, qualifications: q, lastUpdated: timestamp };
+                localStorage.setItem('kawaden_data', JSON.stringify(localData));
 
                 if (!user || useLocalMode) return; 
                 
-                db.collection('kawaden_data').doc('main_list').set({
-                    workers: w,
-                    qualifications: q
-                }).catch(handleFirestoreError);
+                db.collection('kawaden_data').doc('main_list').set(localData).catch(handleFirestoreError);
             };
 
             const updateWorkerHealth = (id, newDate) => {
@@ -335,19 +340,22 @@
                 updateCloud(newWorkers, null);
             };
 
-            // 🌟 新規資格の追加処理
+            // 🌟 修正③：職人追加処理（キーボードが開いていても動くようにイベントを調整）
+            const handleAddWorkerSubmit = (e) => {
+                if (e) e.preventDefault();
+                if (!newWorkerName.trim()) return;
+                const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [], qualDetails: {} }];
+                setWorkers(nw); 
+                updateCloud(nw, null); 
+                setNewWorkerName(''); 
+                setShowAddModal(false);
+            };
+
+            // 🌟 修正③：資格追加処理
             const handleAddQualSubmit = (e) => {
-                e.preventDefault();
+                if (e) e.preventDefault();
                 if (!newQualName.trim()) return;
-                
-                const newQualId = `q${Date.now()}`;
-                const newQual = { 
-                    id: newQualId, 
-                    name: newQualName.trim(),
-                    requiresUpdate: false,
-                    isKinden: false
-                };
-                
+                const newQual = { id: `q${Date.now()}`, name: newQualName.trim(), requiresUpdate: false, isKinden: false };
                 const newQuals = [...qualifications, newQual];
                 setQualifications(newQuals);
                 updateCloud(null, newQuals);
@@ -363,9 +371,7 @@
                         setWorkerImages(prev => ({...prev, [qualId]: compressedBase64}));
                         return;
                     }
-                    await db.collection('kawaden_images').doc(workerId).set({
-                        [qualId]: compressedBase64
-                    }, { merge: true });
+                    await db.collection('kawaden_images').doc(workerId).set({ [qualId]: compressedBase64 }, { merge: true });
                 } catch (e) {
                     alert("画像の保存に失敗しました。");
                 }
@@ -379,9 +385,7 @@
                     setWorkerImages(newImages);
                     return;
                 }
-                await db.collection('kawaden_images').doc(workerId).update({
-                    [qualId]: firebase.firestore.FieldValue.delete()
-                });
+                await db.collection('kawaden_images').doc(workerId).update({ [qualId]: firebase.firestore.FieldValue.delete() });
             };
 
             const toggleQual = (workerId, qualId) => {
@@ -404,6 +408,18 @@
                 [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
                 setList(newList);
                 if (isQual) updateCloud(null, newList); else updateCloud(newList, null);
+            };
+
+            const renameItem = (id, newName, isQual) => {
+                if (isQual) {
+                    const newList = qualifications.map(q => q.id === id ? { ...q, name: newName } : q);
+                    setQualifications(newList);
+                    updateCloud(null, newList);
+                } else {
+                    const newList = workers.map(w => w.id === id ? { ...w, name: newName } : w);
+                    setWorkers(newList);
+                    updateCloud(newList, null);
+                }
             };
 
             const deleteItem = (id, isQual) => {
@@ -511,7 +527,6 @@ service cloud.firestore {
                                 <button onClick={() => setShowAddModal(true)} className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"><IconUserPlus className="w-5 h-5" /></button>
                             )}
 
-                            {/* 🌟 資格追加ボタンの表示 */}
                             {isEditMode && (
                                 <button onClick={() => setShowAddQualModal(true)} className="p-2 bg-white text-blue-600 rounded-lg flex items-center gap-1 font-bold shadow-lg active:scale-95 transition-all mr-1">
                                     <IconPlus className="w-4 h-4" />
@@ -572,16 +587,14 @@ service cloud.firestore {
                                                                        style={{ width: `${Math.max(10, 14 * zoomScale)}px`, height: `${Math.max(10, 14 * zoomScale)}px` }} 
                                                                        title="定期更新が必要です" />
                                                         )}
-                                                        {/* 🌟 修正ポイント：入力中の文字リセットバグを解消 */}
+                                                        {/* 🌟 修正④：文字の入力状態がリセットされないよう defaultValue と onBlur で保存 */}
                                                         {isEditMode ? (
                                                             <textarea className="border border-orange-200 outline-none focus:border-orange-500 rounded text-center transition-colors" 
                                                                       style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: '10px', padding: '2px', width: '24px', height: '100px' }} 
-                                                                      value={q.name} 
-                                                                      onChange={(e) => {
-                                                                          const newQuals = qualifications.map(qual => qual.id === q.id ? { ...qual, name: e.target.value } : qual);
-                                                                          setQualifications(newQuals);
+                                                                      defaultValue={q.name} 
+                                                                      onBlur={(e) => {
+                                                                          if(e.target.value !== q.name) renameItem(q.id, e.target.value, true);
                                                                       }} 
-                                                                      onBlur={() => updateCloud(null, qualifications)}
                                                             />
                                                         ) : (
                                                             <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: `${qualFontSize}px` }} 
@@ -609,14 +622,12 @@ service cloud.firestore {
                                                         )}
                                                         {isEditMode ? (
                                                             <div className="flex flex-col gap-1 w-full pr-1">
-                                                                {/* 🌟 修正ポイント：入力中の文字リセットバグを解消 */}
+                                                                {/* 🌟 修正④：文字の入力状態がリセットされないよう defaultValue と onBlur で保存 */}
                                                                 <input className="border-2 border-orange-200 px-1.5 py-0.5 w-full text-sm font-bold rounded focus:border-orange-500 outline-none" 
-                                                                       value={worker.name} 
-                                                                       onChange={(e) => {
-                                                                           const newWorkers = workers.map(w => w.id === worker.id ? { ...w, name: e.target.value } : w);
-                                                                           setWorkers(newWorkers);
+                                                                       defaultValue={worker.name} 
+                                                                       onBlur={(e) => {
+                                                                           if(e.target.value !== worker.name) renameItem(worker.id, e.target.value, false);
                                                                        }} 
-                                                                       onBlur={() => updateCloud(workers, null)}
                                                                        placeholder="氏名" 
                                                                 />
                                                                 <div className="flex items-center gap-1">
@@ -814,33 +825,35 @@ service cloud.firestore {
                         </div>
                     )}
 
-                    {/* 🌟 修正ポイント：職人の追加処理をフォームの送信イベントに一本化 */}
+                    {/* 🌟 修正⑤：確実なクリックイベントの補足 */}
                     {showAddModal && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-white/20">
                                 <h2 className="text-xl font-black mb-6 text-gray-800 flex items-center gap-2">
                                     <IconUserPlus className="text-blue-600" /> 職人の新規追加
                                 </h2>
-                                <form onSubmit={(e) => {
-                                    e.preventDefault(); 
-                                    if (!newWorkerName.trim()) return;
-                                    const nw = [...workers, { id: `w${Date.now()}`, name: newWorkerName.trim(), healthDate: '', quals: [], qualDetails: {} }];
-                                    setWorkers(nw); updateCloud(nw, null); setNewWorkerName(''); setShowAddModal(false);
-                                }}>
+                                <form onSubmit={handleAddWorkerSubmit}>
                                     <div className="mb-8">
                                         <label className="block text-xs font-bold text-gray-400 mb-2 px-1 uppercase tracking-widest">お名前</label>
                                         <input type="text" value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)} placeholder="例：川口 雄志" className="w-full border-2 border-gray-100 p-3 rounded-2xl outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-50 transition-all text-lg font-bold" autoFocus />
                                     </div>
                                     <div className="flex justify-end gap-3 font-bold">
                                         <button type="button" onClick={() => setShowAddModal(false)} className="px-6 py-2 text-gray-400 hover:text-gray-600 transition-colors">戻る</button>
-                                        <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform">追加する</button>
+                                        <button 
+                                            type="button" 
+                                            onPointerDown={e => e.preventDefault()} 
+                                            onClick={handleAddWorkerSubmit} 
+                                            className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform"
+                                        >
+                                            追加する
+                                        </button>
                                     </div>
                                 </form>
                             </div>
                         </div>
                     )}
 
-                    {/* 🌟 新規追加：資格の追加専用モーダル */}
+                    {/* 🌟 修正⑤：確実なクリックイベントの補足 */}
                     {showAddQualModal && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                             <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-white/20">
@@ -854,7 +867,14 @@ service cloud.firestore {
                                     </div>
                                     <div className="flex justify-end gap-3 font-bold">
                                         <button type="button" onClick={() => setShowAddQualModal(false)} className="px-6 py-2 text-gray-400 hover:text-gray-600 transition-colors">戻る</button>
-                                        <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform">追加する</button>
+                                        <button 
+                                            type="button" 
+                                            onPointerDown={e => e.preventDefault()} 
+                                            onClick={handleAddQualSubmit} 
+                                            className="px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-transform"
+                                        >
+                                            追加する
+                                        </button>
                                     </div>
                                 </form>
                             </div>
